@@ -1,5 +1,5 @@
 # src/analytics.py
-
+import random
 import sqlite3
 from typing import List, Dict
 
@@ -108,3 +108,72 @@ if __name__ == "__main__":
 
     print("\nPortfolio metrics:")
     print(calculate_portfolio_metrics(symbols))
+
+def generate_random_portfolios(symbols, n_portfolios=2000):
+    """
+    Generate random portfolios of the given symbols.
+    Returns a DataFrame with columns:
+    ['return', 'volatility', 'sharpe', 'weights']
+    """
+    # Load aligned return series for all symbols
+    series_list = []
+    for sym in symbols:
+        df = load_price_series(sym)
+        series_list.append(df["return"].rename(sym))
+
+    returns_df = pd.concat(series_list, axis=1).dropna()
+    mean_returns = returns_df.mean() * 252          # annualized
+    cov_matrix = returns_df.cov() * 252             # annualized
+
+    portfolio_results = {
+        "return": [],
+        "volatility": [],
+        "sharpe": [],
+        "weights": []
+    }
+
+    for _ in range(n_portfolios):
+        # random weights that sum to 1
+        weights = np.random.random(len(symbols))
+        weights = weights / np.sum(weights)
+
+        port_return = np.dot(weights, mean_returns)
+        port_vol = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+        sharpe = port_return / port_vol if port_vol != 0 else 0.0
+
+        portfolio_results["return"].append(port_return)
+        portfolio_results["volatility"].append(port_vol)
+        portfolio_results["sharpe"].append(sharpe)
+        portfolio_results["weights"].append(weights)
+
+    df_ports = pd.DataFrame({
+        "return": portfolio_results["return"],
+        "volatility": portfolio_results["volatility"],
+        "sharpe": portfolio_results["sharpe"],
+    })
+
+    # store weights separately (cannot be in DataFrame easily)
+    df_ports["weights"] = portfolio_results["weights"]
+
+    return df_ports
+
+
+def calculate_max_sharpe_portfolio(symbols, n_portfolios=2000) -> Dict[str, object]:
+    """
+    Brute-force style search over many random portfolios
+    to find the one with the highest Sharpe ratio.
+    """
+    df_ports = generate_random_portfolios(symbols, n_portfolios)
+    idx_max = df_ports["sharpe"].idxmax()
+
+    best = df_ports.loc[idx_max]
+    weights = best["weights"]
+
+    result = {
+        "symbols": symbols,
+        "weights": [round(float(w), 3) for w in weights],
+        "annual_return": round(float(best["return"]), 4),
+        "annual_volatility": round(float(best["volatility"]), 4),
+        "sharpe_ratio": round(float(best["sharpe"]), 2),
+    }
+    return result
