@@ -33,7 +33,7 @@ This is designed as a compact project for a **Summer Analyst / Engineering inter
      - 95% historical daily Value-at-Risk (VaR)
    - Computes equal-weighted **portfolio metrics** across multiple symbols.
 
-3. **Dashboard (optional)**
+3. **Dashboard**
    - Built with `streamlit`.
    - Shows:
      - Metrics table for selected symbols
