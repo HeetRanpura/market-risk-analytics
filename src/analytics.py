@@ -1,5 +1,5 @@
 # src/analytics.py
-import random
+
 import sqlite3
 from typing import List, Dict
 
@@ -10,7 +10,7 @@ from config import DB_PATH
 
 
 def load_price_series(symbol: str) -> pd.DataFrame:
-    """Load close prices for a symbol from the SQLite database."""
+    """Load close prices & daily returns for a symbol from the SQLite DB."""
     conn = sqlite3.connect(DB_PATH)
 
     query = """
@@ -19,7 +19,6 @@ def load_price_series(symbol: str) -> pd.DataFrame:
         WHERE symbol = ?
         ORDER BY date;
     """
-
     df = pd.read_sql_query(query, conn, params=(symbol,), parse_dates=["date"])
     conn.close()
 
@@ -33,147 +32,62 @@ def load_price_series(symbol: str) -> pd.DataFrame:
 
 
 def calculate_metrics_for_symbol(symbol: str) -> Dict[str, float]:
-    """Return basic risk & performance metrics for one symbol."""
     df = load_price_series(symbol)
-
     daily_ret = df["return"].mean()
     daily_vol = df["return"].std()
 
-    # Annualize assuming 252 trading days
     annual_ret = daily_ret * 252
     annual_vol = daily_vol * np.sqrt(252)
-
-    # Sharpe with rf ~ 0 for simplicity
     sharpe = annual_ret / annual_vol if annual_vol != 0 else 0.0
+    var95 = np.percentile(df["return"], 5)
 
-    # 95% historical Value-at-Risk (left tail)
-    var_95 = np.percentile(df["return"], 5)
-
-    metrics = {
+    return {
         "symbol": symbol,
-        "days": int(len(df)),
         "annual_return": round(annual_ret, 4),
         "annual_volatility": round(annual_vol, 4),
         "sharpe_ratio": round(sharpe, 2),
-        "VaR_95_daily": round(var_95, 4)
+        "VaR_95_daily": round(var95, 4),
     }
-    return metrics
 
 
 def calculate_portfolio_metrics(symbols: List[str],
                                 weights: List[float] = None) -> Dict[str, float]:
-    """Equal-weight or custom-weight portfolio metrics based on daily returns."""
     if weights is None:
         weights = [1.0 / len(symbols)] * len(symbols)
 
-    if len(symbols) != len(weights):
-        raise ValueError("Symbols and weights must have same length.")
-
-    # Load all series and align on date
-    series_list = []
-    for sym in symbols:
-        df = load_price_series(sym)
-        series_list.append(df["return"].rename(sym))
-
+    series_list = [load_price_series(sym)["return"].rename(sym) for sym in symbols]
     returns_df = pd.concat(series_list, axis=1).dropna()
 
     w = np.array(weights)
-    daily_portfolio_returns = returns_df.dot(w)
-
-    daily_ret = daily_portfolio_returns.mean()
-    daily_vol = daily_portfolio_returns.std()
+    daily_ret = returns_df.dot(w).mean()
+    daily_vol = returns_df.dot(w).std()
 
     annual_ret = daily_ret * 252
     annual_vol = daily_vol * np.sqrt(252)
     sharpe = annual_ret / annual_vol if annual_vol != 0 else 0.0
-    var_95 = np.percentile(daily_portfolio_returns, 5)
+    var95 = np.percentile(returns_df.dot(w), 5)
 
-    metrics = {
+    return {
         "symbols": symbols,
         "weights": [round(float(x), 3) for x in w],
-        "days": int(len(daily_portfolio_returns)),
         "annual_return": round(annual_ret, 4),
         "annual_volatility": round(annual_vol, 4),
         "sharpe_ratio": round(sharpe, 2),
-        "VaR_95_daily": round(var_95, 4)
-    }
-    return metrics
-
-
-if __name__ == "__main__":
-    # Quick test
-    symbols = ["AAPL", "MSFT", "GOOGL"]
-    for s in symbols:
-        print(calculate_metrics_for_symbol(s))
-
-    print("\nPortfolio metrics:")
-    print(calculate_portfolio_metrics(symbols))
-
-def generate_random_portfolios(symbols, n_portfolios=2000):
-    """
-    Generate random portfolios of the given symbols.
-    Returns a DataFrame with columns:
-    ['return', 'volatility', 'sharpe', 'weights']
-    """
-    # Load aligned return series for all symbols
-    series_list = []
-    for sym in symbols:
-        df = load_price_series(sym)
-        series_list.append(df["return"].rename(sym))
-
-    returns_df = pd.concat(series_list, axis=1).dropna()
-    mean_returns = returns_df.mean() * 252          # annualized
-    cov_matrix = returns_df.cov() * 252             # annualized
-
-    portfolio_results = {
-        "return": [],
-        "volatility": [],
-        "sharpe": [],
-        "weights": []
+        "VaR_95_daily": round(var95, 4),
     }
 
-    for _ in range(n_portfolios):
-        # random weights that sum to 1
-        weights = np.random.random(len(symbols))
-        weights = weights / np.sum(weights)
 
-        port_return = np.dot(weights, mean_returns)
-        port_vol = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
-        sharpe = port_return / port_vol if port_vol != 0 else 0.0
+# ---------------- NEW FEATURES BELOW ---------------- #
 
-        portfolio_results["return"].append(port_return)
-        portfolio_results["volatility"].append(port_vol)
-        portfolio_results["sharpe"].append(sharpe)
-        portfolio_results["weights"].append(weights)
-
-    df_ports = pd.DataFrame({
-        "return": portfolio_results["return"],
-        "volatility": portfolio_results["volatility"],
-        "sharpe": portfolio_results["sharpe"],
-    })
-
-    # store weights separately (cannot be in DataFrame easily)
-    df_ports["weights"] = portfolio_results["weights"]
-
-    return df_ports
+def calculate_max_drawdown(symbol: str) -> float:
+    df = load_price_series(symbol)
+    df["cumulative"] = (1 + df["return"]).cumprod()
+    peak = df["cumulative"].cummax()
+    drawdown = (df["cumulative"] - peak) / peak
+    return round(float(drawdown.min()), 4)
 
 
-def calculate_max_sharpe_portfolio(symbols, n_portfolios=2000) -> Dict[str, object]:
-    """
-    Brute-force style search over many random portfolios
-    to find the one with the highest Sharpe ratio.
-    """
-    df_ports = generate_random_portfolios(symbols, n_portfolios)
-    idx_max = df_ports["sharpe"].idxmax()
-
-    best = df_ports.loc[idx_max]
-    weights = best["weights"]
-
-    result = {
-        "symbols": symbols,
-        "weights": [round(float(w), 3) for w in weights],
-        "annual_return": round(float(best["return"]), 4),
-        "annual_volatility": round(float(best["volatility"]), 4),
-        "sharpe_ratio": round(float(best["sharpe"]), 2),
-    }
-    return result
+def calculate_correlations(symbols: List[str]) -> pd.DataFrame:
+    series = [load_price_series(sym)["return"].rename(sym) for sym in symbols]
+    corr_df = pd.concat(series, axis=1).dropna()
+    return corr_df.corr()
