@@ -50,6 +50,12 @@ This is designed as a compact project for a **Summer Analyst / Engineering inter
 - **yFinance**: historical market data
 - **Streamlit**: quick interactive dashboard
 
+![Python](https://img.shields.io/badge/Python-3.10-blue)
+![SQLite](https://img.shields.io/badge/Database-SQLite-orange)
+![Streamlit](https://img.shields.io/badge/UI-Streamlit-brightgreen)
+![Data Engineering](https://img.shields.io/badge/Focus-Data%20Engineering-ff69b4)
+
+
 ---
 
 ## Project Structure
